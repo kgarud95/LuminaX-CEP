@@ -1,0 +1,640 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # INFRASTRUCTURE SERVICES
+  # ===========================================
+  
+  # API Gateway
+  api-gateway:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+      - "8081:81"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./infrastructure/nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - service-discovery
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # Service Discovery (Consul)
+  service-discovery:
+    image: consul:latest
+    ports:
+      - "8500:8500"
+    environment:
+      - CONSUL_BIND_INTERFACE=eth0
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # ===========================================
+  # DATABASES
+  # ===========================================
+  
+  # MongoDB Primary
+  mongodb-primary:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=luminax123
+    volumes:
+      - mongodb-data:/data/db
+      - ./infrastructure/mongodb/init:/docker-entrypoint-initdb.d
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # Redis Cluster
+  redis-master:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --replica-read-only no
+    volumes:
+      - redis-data:/data
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # PostgreSQL for Analytics
+  postgres-analytics:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=luminax_analytics
+      - POSTGRES_USER=luminax
+      - POSTGRES_PASSWORD=luminax123
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # Elasticsearch
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # ===========================================
+  # MESSAGE QUEUES
+  # ===========================================
+  
+  # Apache Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - luminax-network
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - luminax-network
+
+  # RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=luminax
+      - RABBITMQ_DEFAULT_PASS=luminax123
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # ===========================================
+  # IDENTITY DOMAIN SERVICES
+  # ===========================================
+  
+  authentication-service:
+    build: ./services/identity/authentication-service
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-identity?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+      - JWT_SECRET=your-super-secret-jwt-key-here
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  authorization-service:
+    build: ./services/identity/authorization-service
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=development
+      - PORT=3002
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-identity?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+      - JWT_SECRET=your-super-secret-jwt-key-here
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  user-profile-service:
+    build: ./services/identity/user-profile-service
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-identity?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  session-management-service:
+    build: ./services/identity/session-management-service
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=development
+      - PORT=3004
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  oauth-provider-service:
+    build: ./services/identity/oauth-provider-service
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=development
+      - PORT=3005
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-identity?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  identity-verification-service:
+    build: ./services/identity/identity-verification-service
+    ports:
+      - "3006:3006"
+    environment:
+      - NODE_ENV=development
+      - PORT=3006
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-identity?authSource=admin
+    depends_on:
+      - mongodb-primary
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  account-recovery-service:
+    build: ./services/identity/account-recovery-service
+    ports:
+      - "3007:3007"
+    environment:
+      - NODE_ENV=development
+      - PORT=3007
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-identity?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  audit-logging-service:
+    build: ./services/identity/audit-logging-service
+    ports:
+      - "3008:3008"
+    environment:
+      - NODE_ENV=development
+      - PORT=3008
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-identity?authSource=admin
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - mongodb-primary
+      - elasticsearch
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # ===========================================
+  # CONTENT DOMAIN SERVICES
+  # ===========================================
+  
+  course-catalog-service:
+    build: ./services/content/course-catalog-service
+    ports:
+      - "3011:3011"
+    environment:
+      - NODE_ENV=development
+      - PORT=3011
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-content?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - mongodb-primary
+      - redis-master
+      - elasticsearch
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  lesson-content-service:
+    build: ./services/content/lesson-content-service
+    ports:
+      - "3012:3012"
+    environment:
+      - NODE_ENV=development
+      - PORT=3012
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-content?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  video-processing-service:
+    build: ./services/content/video-processing-service
+    ports:
+      - "3013:3013"
+    environment:
+      - NODE_ENV=development
+      - PORT=3013
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-content?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - mongodb-primary
+      - redis-master
+      - kafka
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  file-storage-service:
+    build: ./services/content/file-storage-service
+    ports:
+      - "3014:3014"
+    environment:
+      - NODE_ENV=development
+      - PORT=3014
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-content?authSource=admin
+    depends_on:
+      - mongodb-primary
+    networks:
+      - luminax-network
+    restart: unless-stopped
+    volumes:
+      - file-storage:/app/uploads
+
+  content-versioning-service:
+    build: ./services/content/content-versioning-service
+    ports:
+      - "3015:3015"
+    environment:
+      - NODE_ENV=development
+      - PORT=3015
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-content?authSource=admin
+    depends_on:
+      - mongodb-primary
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  metadata-service:
+    build: ./services/content/metadata-service
+    ports:
+      - "3016:3016"
+    environment:
+      - NODE_ENV=development
+      - PORT=3016
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-content?authSource=admin
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+    depends_on:
+      - mongodb-primary
+      - elasticsearch
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  content-moderation-service:
+    build: ./services/content/content-moderation-service
+    ports:
+      - "3017:3017"
+    environment:
+      - NODE_ENV=development
+      - PORT=3017
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-content?authSource=admin
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - mongodb-primary
+      - kafka
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  media-streaming-service:
+    build: ./services/content/media-streaming-service
+    ports:
+      - "3018:3018"
+    environment:
+      - NODE_ENV=development
+      - PORT=3018
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  content-search-service:
+    build: ./services/content/content-search-service
+    ports:
+      - "3019:3019"
+    environment:
+      - NODE_ENV=development
+      - PORT=3019
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - elasticsearch
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  content-analytics-service:
+    build: ./services/content/content-analytics-service
+    ports:
+      - "3020:3020"
+    environment:
+      - NODE_ENV=development
+      - PORT=3020
+      - POSTGRES_URI=postgresql://luminax:luminax123@postgres-analytics:5432/luminax_analytics
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - postgres-analytics
+      - kafka
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # ===========================================
+  # LEARNING DOMAIN SERVICES
+  # ===========================================
+  
+  progress-tracking-service:
+    build: ./services/learning/progress-tracking-service
+    ports:
+      - "3021:3021"
+    environment:
+      - NODE_ENV=development
+      - PORT=3021
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-learning?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - mongodb-primary
+      - redis-master
+      - kafka
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  quiz-engine-service:
+    build: ./services/learning/quiz-engine-service
+    ports:
+      - "3022:3022"
+    environment:
+      - NODE_ENV=development
+      - PORT=3022
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-learning?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  certificate-service:
+    build: ./services/learning/certificate-service
+    ports:
+      - "3023:3023"
+    environment:
+      - NODE_ENV=development
+      - PORT=3023
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-learning?authSource=admin
+    depends_on:
+      - mongodb-primary
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  learning-path-service:
+    build: ./services/learning/learning-path-service
+    ports:
+      - "3024:3024"
+    environment:
+      - NODE_ENV=development
+      - PORT=3024
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-learning?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  gamification-service:
+    build: ./services/learning/gamification-service
+    ports:
+      - "3025:3025"
+    environment:
+      - NODE_ENV=development
+      - PORT=3025
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-learning?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  study-analytics-service:
+    build: ./services/learning/study-analytics-service
+    ports:
+      - "3026:3026"
+    environment:
+      - NODE_ENV=development
+      - PORT=3026
+      - POSTGRES_URI=postgresql://luminax:luminax123@postgres-analytics:5432/luminax_analytics
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - postgres-analytics
+      - kafka
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  assignment-service:
+    build: ./services/learning/assignment-service
+    ports:
+      - "3027:3027"
+    environment:
+      - NODE_ENV=development
+      - PORT=3027
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-learning?authSource=admin
+    depends_on:
+      - mongodb-primary
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  discussion-forum-service:
+    build: ./services/learning/discussion-forum-service
+    ports:
+      - "3028:3028"
+    environment:
+      - NODE_ENV=development
+      - PORT=3028
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-learning?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  live-session-service:
+    build: ./services/learning/live-session-service
+    ports:
+      - "3029:3029"
+    environment:
+      - NODE_ENV=development
+      - PORT=3029
+      - MONGODB_URI=mongodb://admin:luminax123@mongodb-primary:27017/luminax-learning?authSource=admin
+      - REDIS_URL=redis://redis-master:6379
+    depends_on:
+      - mongodb-primary
+      - redis-master
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  # ===========================================
+  # MONITORING & OBSERVABILITY
+  # ===========================================
+  
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=luminax123
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infrastructure/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./infrastructure/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"
+      - "14268:14268"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - luminax-network
+    restart: unless-stopped
+
+# ===========================================
+# VOLUMES
+# ===========================================
+volumes:
+  mongodb-data:
+  redis-data:
+  postgres-data:
+  elasticsearch-data:
+  rabbitmq-data:
+  file-storage:
+  prometheus-data:
+  grafana-data:
+
+# ===========================================
+# NETWORKS
+# ===========================================
+networks:
+  luminax-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

@@ -1,0 +1,218 @@
+# LuminaX Prometheus Configuration
+# Monitoring configuration for all microservices
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'luminax-production'
+    environment: 'development'
+
+rule_files:
+  - "rules/*.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Node Exporter for system metrics
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # API Gateway
+  - job_name: 'api-gateway'
+    static_configs:
+      - targets: ['api-gateway:80']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Identity Domain Services
+  - job_name: 'identity-services'
+    static_configs:
+      - targets:
+        - 'authentication-service:3001'
+        - 'authorization-service:3002'
+        - 'user-profile-service:3003'
+        - 'session-management-service:3004'
+        - 'oauth-provider-service:3005'
+        - 'identity-verification-service:3006'
+        - 'account-recovery-service:3007'
+        - 'audit-logging-service:3008'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service_domain
+        replacement: 'identity'
+
+  # Content Domain Services
+  - job_name: 'content-services'
+    static_configs:
+      - targets:
+        - 'course-catalog-service:3011'
+        - 'lesson-content-service:3012'
+        - 'video-processing-service:3013'
+        - 'file-storage-service:3014'
+        - 'content-versioning-service:3015'
+        - 'metadata-service:3016'
+        - 'content-moderation-service:3017'
+        - 'media-streaming-service:3018'
+        - 'content-search-service:3019'
+        - 'content-analytics-service:3020'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service_domain
+        replacement: 'content'
+
+  # Learning Domain Services
+  - job_name: 'learning-services'
+    static_configs:
+      - targets:
+        - 'progress-tracking-service:3021'
+        - 'quiz-engine-service:3022'
+        - 'certificate-service:3023'
+        - 'learning-path-service:3024'
+        - 'gamification-service:3025'
+        - 'study-analytics-service:3026'
+        - 'assignment-service:3027'
+        - 'discussion-forum-service:3028'
+        - 'live-session-service:3029'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service_domain
+        replacement: 'learning'
+
+  # Commerce Domain Services
+  - job_name: 'commerce-services'
+    static_configs:
+      - targets:
+        - 'pricing-service:3031'
+        - 'payment-processing-service:3032'
+        - 'subscription-service:3033'
+        - 'invoice-service:3034'
+        - 'refund-service:3035'
+        - 'financial-reporting-service:3036'
+        - 'coupon-service:3037'
+        - 'revenue-analytics-service:3038'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service_domain
+        replacement: 'commerce'
+
+  # AI/ML Domain Services
+  - job_name: 'ai-services'
+    static_configs:
+      - targets:
+        - 'recommendation-engine-service:3041'
+        - 'chatbot-service:3042'
+        - 'content-analysis-service:3043'
+        - 'learning-optimization-service:3044'
+        - 'predictive-analytics-service:3045'
+        - 'personalization-service:3046'
+        - 'nlp-processing-service:3047'
+        - 'skill-assessment-service:3048'
+        - 'adaptive-learning-service:3049'
+        - 'ai-content-generator-service:3050'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service_domain
+        replacement: 'ai'
+
+  # Analytics Domain Services
+  - job_name: 'analytics-services'
+    static_configs:
+      - targets:
+        - 'user-behavior-analytics-service:3051'
+        - 'course-performance-analytics-service:3052'
+        - 'business-intelligence-service:3053'
+        - 'real-time-metrics-service:3054'
+        - 'reporting-service:3055'
+        - 'dashboard-service:3056'
+        - 'data-pipeline-service:3057'
+        - 'metrics-aggregation-service:3058'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service_domain
+        replacement: 'analytics'
+
+  # Communication Domain Services
+  - job_name: 'communication-services'
+    static_configs:
+      - targets:
+        - 'email-service:3061'
+        - 'push-notification-service:3062'
+        - 'sms-service:3063'
+        - 'in-app-messaging-service:3064'
+        - 'notification-orchestrator-service:3065'
+        - 'communication-template-service:3066'
+        - 'delivery-tracking-service:3067'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service_domain
+        replacement: 'communication'
+
+  # Platform Domain Services
+  - job_name: 'platform-services'
+    static_configs:
+      - targets:
+        - 'api-gateway-service:3071'
+        - 'service-discovery-service:3072'
+        - 'configuration-service:3073'
+        - 'logging-aggregation-service:3074'
+        - 'monitoring-service:3075'
+        - 'health-check-service:3076'
+        - 'backup-service:3077'
+        - 'admin-panel-service:3078'
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: service_domain
+        replacement: 'platform'
+
+  # Database Exporters
+  - job_name: 'mongodb-exporter'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  - job_name: 'elasticsearch-exporter'
+    static_configs:
+      - targets: ['elasticsearch-exporter:9114']
+
+  # Message Queue Exporters
+  - job_name: 'kafka-exporter'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+
+  - job_name: 'rabbitmq-exporter'
+    static_configs:
+      - targets: ['rabbitmq-exporter:9419']
